@@ -1,19 +1,23 @@
 services:
   app-blue:
-    image: nginxdemos/hello:latest
+    image: nginx:alpine
     container_name: app-blue
     restart: unless-stopped
     expose:
       - "80"
+    volumes:
+      - ./app-content/blue/index.html:/usr/share/nginx/html/index.html:ro
     networks:
       - app_net
 
   app-green:
-    image: nginxdemos/hello:latest
+    image: nginx:alpine
     container_name: app-green
     restart: unless-stopped
     expose:
       - "80"
+    volumes:
+      - ./app-content/green/index.html:/usr/share/nginx/html/index.html:ro
     networks:
       - app_net
 

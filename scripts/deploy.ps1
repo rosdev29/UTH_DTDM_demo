@@ -4,10 +4,10 @@ $ErrorActionPreference = "Stop"
 Write-Host "Deploy: start app-green"
 docker compose up -d app-green
 
-Write-Host "Run health check through nginx endpoint"
-& ".\scripts\health-check.ps1" -Url "http://localhost:8080"
+Write-Host "Run health check for app-green directly"
+& ".\scripts\health-check.ps1" -Url "http://app-green:80" -UseNginxNetwork
 if ($LASTEXITCODE -ne 0) {
-  throw "Health check failed."
+  throw "app-green health check failed."
 }
 
 Write-Host "Health check passed. Switch traffic to app-green"

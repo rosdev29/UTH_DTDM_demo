@@ -4,8 +4,8 @@ set -e
 echo "Deploy: start app-green"
 docker compose up -d app-green
 
-echo "Run health check through nginx endpoint"
-bash ./scripts/health-check.sh http://localhost:8080
+echo "Run health check for app-green directly"
+USE_NGINX_NETWORK=1 bash ./scripts/health-check.sh http://app-green:80
 
 echo "Health check passed. Switch traffic to app-green"
 NGINX_CONF="./nginx/nginx.conf"
