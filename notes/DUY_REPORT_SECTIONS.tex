@@ -1,0 +1,268 @@
+% =========================================================
+% NOI DUNG BAO CAO - PHAN CUA DUY (THEO MUC LUC CHUNG)
+% File nay dung de \input vao bao cao tong
+% =========================================================
+
+\subsection*{1.3 Phạm vi và giới hạn đề tài}
+\subsubsection*{1.3.1 Phạm vi kỹ thuật}
+Phần hạ tầng của đề tài tập trung vào mô hình triển khai gọn nhẹ trên một máy ảo duy nhất, sử dụng Docker Compose và Nginx reverse proxy để triển khai chiến lược blue-green. Phạm vi thực hiện bao gồm:
+\begin{itemize}
+  \item Cấu hình môi trường VM và Docker runtime.
+  \item Điều phối container \texttt{app-blue}, \texttt{app-green}, \texttt{nginx}.
+  \item Triển khai các script \texttt{deploy}, \texttt{health-check}, \texttt{rollback}.
+  \item Kiểm soát bảo mật cơ bản ở mức VM và container.
+\end{itemize}
+
+\subsubsection*{1.3.2 Giới hạn}
+\begin{itemize}
+  \item Hệ thống chạy trên single VM nên chưa hỗ trợ mở rộng ngang (auto-scaling).
+  \item Chưa tích hợp đầy đủ stack quan sát tập trung (Prometheus/Grafana/Tracing).
+  \item Quy trình CD có bước xác nhận thủ công để bảo đảm an toàn vận hành.
+\end{itemize}
+
+\section*{2.2 Containerization với Docker}
+
+\subsection*{2.2.1 Kiến trúc Docker: Docker Engine, Images, Containers}
+Docker cung cấp lớp ảo hóa ở mức hệ điều hành, cho phép đóng gói ứng dụng thành image bất biến và chạy dưới dạng container. Trong đề tài, mỗi vai trò được tách thành container độc lập:
+\begin{itemize}
+  \item \texttt{app-blue}: phiên bản đang phục vụ traffic.
+  \item \texttt{app-green}: phiên bản mới dùng để kiểm thử trước khi cắt traffic.
+  \item \texttt{nginx}: reverse proxy, là cổng vào duy nhất.
+\end{itemize}
+
+Kiến trúc này giúp giảm sai khác môi trường, tăng tốc deploy và hỗ trợ rollback rõ ràng.
+
+\subsection*{2.2.2 Dockerfile và multi-stage builds (tối ưu image size)}
+Mặc dù demo hiện tại dùng \texttt{nginx:alpine} để hiển thị nhãn BLUE/GREEN rõ ràng, nguyên tắc multi-stage vẫn là chuẩn khuyến nghị cho ứng dụng thật:
+\begin{itemize}
+  \item Stage build: cài đầy đủ toolchain để biên dịch/test.
+  \item Stage runtime: chỉ chứa artifact cần chạy.
+  \item Kết quả: image nhỏ hơn, pull nhanh hơn, giảm bề mặt tấn công.
+\end{itemize}
+
+\subsection*{2.2.3 Docker Compose: Quản lý multi-container đơn giản (blue-green deployment pattern)}
+Docker Compose được dùng để điều phối mô hình blue-green:
+\begin{itemize}
+  \item Hai service ứng dụng: \texttt{app-blue}, \texttt{app-green}.
+  \item Một service edge: \texttt{nginx}, publish ra \texttt{localhost:8080}.
+  \item Dữ liệu trang tĩnh được mount riêng để hiển thị nhãn trực quan BLUE/GREEN.
+\end{itemize}
+
+Luồng triển khai:
+\begin{enumerate}
+  \item Start \texttt{app-green}.
+  \item Health-check trực tiếp \texttt{app-green} trong Docker network.
+  \item Pass thì đổi upstream Nginx sang green.
+  \item Stop \texttt{app-blue}.
+\end{enumerate}
+
+\subsection*{2.2.4 Docker API và CLI}
+Vận hành chủ yếu qua Docker CLI:
+\begin{itemize}
+  \item \texttt{docker compose up -d app-green}
+  \item \texttt{docker compose exec -T nginx ...}
+  \item \texttt{docker compose restart nginx}
+  \item \texttt{docker compose stop app-blue}
+\end{itemize}
+
+CLI được script hóa giúp quy trình nhất quán, dễ tích hợp ChatOps.
+
+\subsection*{2.2.5 Quản lý trạng thái container (naming convention, labels, volume mounts cho logs)}
+Trạng thái active/standby được quản lý bằng cặp blue-green:
+\begin{itemize}
+  \item Active: container đang nhận traffic từ Nginx.
+  \item Standby: container mới được warm-up và kiểm tra sức khỏe.
+  \item Rollback: đổi upstream về phiên bản trước và khôi phục container ổn định.
+\end{itemize}
+
+\section*{2.3 Máy chủ ảo hóa (Virtual Machine) và Cloud cơ bản}
+
+\subsection*{2.3.1 Kiến trúc VM: Hypervisor, vCPU, vRAM, Storage}
+Đề tài sử dụng mô hình single VM với tài nguyên vừa đủ cho demo:
+\begin{itemize}
+  \item vCPU: 2--4 core
+  \item RAM: 4--8 GB
+  \item Storage SSD: từ 20 GB
+  \item OS: Ubuntu 22.04 LTS
+\end{itemize}
+
+Mô hình này đơn giản hóa vận hành và phù hợp ngân sách sinh viên.
+
+\subsection*{2.3.2 AWS EC2/Azure VM/GCP Compute Engine}
+Hệ thống có thể triển khai trên AWS, Azure hoặc GCP. Trong thực nghiệm nhóm ưu tiên VM đơn lẻ để giảm độ phức tạp và chi phí. Nguyên tắc mạng:
+\begin{itemize}
+  \item Chỉ mở \texttt{22/tcp}, \texttt{80/tcp}, \texttt{443/tcp}.
+  \item Không public trực tiếp cổng nội bộ ứng dụng.
+  \item Truy cập quản trị qua SSH key.
+\end{itemize}
+
+\subsection*{2.3.3 Cloud-init và user data (automation setup cơ bản)}
+Cloud-init được đề xuất cho bước chuẩn hóa môi trường:
+\begin{itemize}
+  \item Cài Docker, Docker Compose, công cụ nền.
+  \item Thiết lập user vận hành và SSH key.
+  \item Áp chính sách firewall mặc định.
+\end{itemize}
+
+\section*{3.3-3.5 Phân tích và thiết kế hệ thống}
+
+\subsection*{3.3.1 Sơ đồ kiến trúc 3 lớp}
+Kiến trúc tổng thể gồm 3 lớp:
+\begin{enumerate}
+  \item CI Layer (Cloud): GitHub Actions + Container Registry.
+  \item ChatOps/CD Layer: Slack + OpenClaw Agent.
+  \item Runtime Layer (Single VM): Nginx + app-blue/app-green.
+\end{enumerate}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{C:/Users/acer/.cursor/projects/d-H-c-k-8-Cloud-Computing-BTL/assets/c__Users_acer_AppData_Roaming_Cursor_User_workspaceStorage_96a48877c6af9509a9307782e2cbecc4_images_DTDM-3.1.drawio-022778c1-9c0c-4cd7-8f55-cfc4f01d3be3.png}
+  \caption{Kiến trúc tổng thể hệ thống}
+  \label{fig:3-1-overall}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{C:/Users/acer/.cursor/projects/d-H-c-k-8-Cloud-Computing-BTL/assets/c__Users_acer_AppData_Roaming_Cursor_User_workspaceStorage_96a48877c6af9509a9307782e2cbecc4_images_DTDM-3.2.drawio-d83f8035-e0c7-463d-ad25-60313bc39ec8.png}
+  \caption{Use Case hệ thống ChatOps}
+  \label{fig:3-2-usecase}
+\end{figure}
+
+\subsection*{3.4.3 Container Deployment Strategy}
+\subsubsection*{3.4.3.a Blue-Green và Health Check}
+Chiến lược triển khai thực tế:
+\begin{enumerate}
+  \item Khởi động \texttt{app-green}.
+  \item Chạy health-check trực tiếp tới \texttt{app-green} trong network nội bộ.
+  \item Nếu đạt, chuyển upstream Nginx sang green và restart Nginx.
+  \item Dừng \texttt{app-blue}.
+\end{enumerate}
+
+Điểm quan trọng: health-check không đi qua endpoint public tại thời điểm trước switch để tránh false-positive.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{C:/Users/acer/.cursor/projects/d-H-c-k-8-Cloud-Computing-BTL/assets/c__Users_acer_AppData_Roaming_Cursor_User_workspaceStorage_96a48877c6af9509a9307782e2cbecc4_images_DTDM-3.3.drawio__1_-354803c9-2396-4497-a2aa-053717a33059.png}
+  \caption{Sequence triển khai và rollback}
+  \label{fig:3-3-sequence}
+\end{figure}
+
+\subsubsection*{3.4.3.b Rollback Automation}
+Khi triển khai lỗi:
+\begin{enumerate}
+  \item Chuyển upstream về blue.
+  \item Restart Nginx.
+  \item Bảo đảm \texttt{app-blue} chạy.
+  \item Dừng \texttt{app-green}.
+\end{enumerate}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{C:/Users/acer/.cursor/projects/d-H-c-k-8-Cloud-Computing-BTL/assets/c__Users_acer_AppData_Roaming_Cursor_User_workspaceStorage_96a48877c6af9509a9307782e2cbecc4_images_DTDM-3.4.drawio__1_-3f46f0ee-1e6f-408d-85fa-3761e778fff8.png}
+  \caption{Máy trạng thái của OpenClaw}
+  \label{fig:3-4-state}
+\end{figure}
+
+\subsection*{3.5 Thiết kế bảo mật}
+\subsubsection*{3.5.1 VM Security}
+\begin{itemize}
+  \item SSH key-only, tắt password login.
+  \item Không cho phép root login trực tiếp.
+  \item Firewall tối thiểu: \texttt{22}, \texttt{80}, \texttt{443}.
+  \item Cập nhật bản vá định kỳ.
+\end{itemize}
+
+\subsubsection*{3.5.2 Docker Security}
+\begin{itemize}
+  \item Không expose cổng app nội bộ ra Internet.
+  \item Tách reverse proxy và app.
+  \item Khuyến nghị chạy non-root với service thực tế.
+  \item Secret không hardcode trong source.
+\end{itemize}
+
+\section*{4.1-4.4 Triển khai và kết quả}
+
+\subsection*{4.1 Môi trường triển khai}
+\subsubsection*{4.1.1 Thông số VM}
+\begin{itemize}
+  \item 2--4 vCPU, 4--8 GB RAM, SSD 20 GB+.
+  \item Ubuntu 22.04 LTS.
+\end{itemize}
+
+\subsubsection*{4.1.2 Phần mềm cài đặt}
+\begin{itemize}
+  \item Docker CE
+  \item Docker Compose v2
+  \item Nginx (container reverse proxy)
+  \item Script PowerShell/Bash cho deploy, health-check, rollback
+\end{itemize}
+
+\subsubsection*{4.1.3 Môi trường phát triển}
+\begin{itemize}
+  \item Local Windows + PowerShell.
+  \item Docker Desktop.
+  \item Kiểm thử qua \texttt{http://localhost:8080}.
+\end{itemize}
+
+\subsection*{4.4 Triển khai Chiến lược Deployment}
+\subsubsection*{4.4.1 Cài đặt Blue-Green}
+Hai môi trường chạy song song:
+\begin{itemize}
+  \item \texttt{app-blue}: hiển thị nhãn \textbf{BLUE}.
+  \item \texttt{app-green}: hiển thị nhãn \textbf{GREEN}.
+\end{itemize}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{C:/Users/acer/.cursor/projects/d-H-c-k-8-Cloud-Computing-BTL/assets/c__Users_acer_AppData_Roaming_Cursor_User_workspaceStorage_96a48877c6af9509a9307782e2cbecc4_images_DTDM-3.5.drawio__2_-8eca4b75-42cd-474a-b093-3a2997e9181b.png}
+  \caption{Kiến trúc triển khai Blue-Green tối giản}
+  \label{fig:3-5-bluegreen}
+\end{figure}
+
+\subsubsection*{4.4.2 Health Check Script}
+Health-check được viết cho cả Bash và PowerShell, có cơ chế retry, timeout, và hỗ trợ chế độ kiểm tra nội bộ qua Nginx container.
+
+\subsubsection*{4.4.3 Rollback Automation}
+Rollback tự động được kích hoạt khi health-check không đạt ngưỡng, bảo đảm hệ thống quay về trạng thái ổn định.
+
+\subsection*{4.6 Kết quả đạt được}
+\subsubsection*{4.6.1 Chức năng đã cài đặt}
+Trong phạm vi phần hạ tầng và deployment strategy, các chức năng đã hoàn thành gồm:
+\begin{itemize}
+  \item Mô hình blue-green với hai môi trường \texttt{app-blue} và \texttt{app-green}.
+  \item Cơ chế chuyển traffic qua Nginx upstream.
+  \item Health-check tự động trước khi cắt traffic sang phiên bản mới.
+  \item Rollback tự động về phiên bản ổn định khi health-check thất bại.
+  \item Giao diện demo trực quan hiển thị nhãn BLUE/GREEN để xác nhận môi trường active.
+\end{itemize}
+
+\subsubsection*{4.6.2 Hiệu năng và đánh giá}
+Kết quả kiểm thử thực tế cho thấy:
+\begin{itemize}
+  \item Endpoint công khai \texttt{http://localhost:8080} duy trì phản hồi \texttt{HTTP 200} trong các kịch bản deploy/rollback.
+  \item Quy trình deploy có kiểm tra sức khỏe giúp giảm rủi ro phát hành lỗi do switch traffic sớm.
+  \item Rollback có thể thực hiện nhanh do chỉ đổi upstream và dừng/khởi động container tương ứng.
+  \item So với cách triển khai thủ công, quy trình script hóa giúp thao tác nhất quán và giảm sai sót vận hành.
+\end{itemize}
+
+Nhìn chung, giải pháp đạt mục tiêu demo: đơn giản, dễ lặp lại, và đủ độ tin cậy cho môi trường đồ án.
+
+\section*{Phụ lục C -- Hướng dẫn chạy demo}
+\begin{verbatim}
+cd UTH_DTDM_demo
+docker compose up -d
+
+powershell -ExecutionPolicy Bypass -File .\scripts\deploy.ps1
+curl.exe -I http://localhost:8080
+
+powershell -ExecutionPolicy Bypass -File .\scripts\rollback.ps1
+curl.exe -I http://localhost:8080
+\end{verbatim}
+
+Kỳ vọng:
+\begin{itemize}
+  \item Sau deploy: giao diện hiển thị GREEN.
+  \item Sau rollback: giao diện hiển thị BLUE.
+  \item Endpoint luôn phản hồi HTTP 200.
+\end{itemize}
+

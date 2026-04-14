@@ -1,0 +1,20 @@
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.nav
+*.snm
+
+# Preview outputs in notes
+notes/*_PREVIEW.pdf
+notes/*_PREVIEW.aux
+notes/*_PREVIEW.log
+
+# OS/editor temp files
+.DS_Store
+Thumbs.db
+*.tmp
