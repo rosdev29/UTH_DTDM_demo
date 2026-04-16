@@ -1,0 +1,58 @@
+name: OpenClaw CI Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  # 1. TEST: Kiểm tra cú pháp các file Bash/Shell
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Lint Shell scripts
+        run: shellcheck scripts/*.sh
+
+  # 2. BUILD: Đóng gói hệ thống Blue-Green (HTML + Nginx)
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Đăng nhập Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build & Push Image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          # Gắn tag image bằng mã SHA của commit để đảm bảo tính bất biến
+          tags: ${{ secrets.DOCKER_USERNAME }}/uth-demo:${{ github.sha }}
+
+  # 3. NOTIFY: Bàn giao Metadata cho máy chủ ảo (VM)
+  notify:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Webhook to VM
+        env:
+          WEBHOOK_URL: ${{ secrets.VM_WEBHOOK_URL }}
+          SECRET_KEY: ${{ secrets.WEBHOOK_SECRET }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          PAYLOAD="{\"image_tag\": \"${IMAGE_TAG}\", \"commit_sha\": \"${IMAGE_TAG}\"}"
+          SIGNATURE=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "$SECRET_KEY" | sed 's/^.* //')
+          
+          curl -X POST "$WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -H "X-Hub-Signature-256: sha256=$SIGNATURE" \
+            -d "$PAYLOAD"
